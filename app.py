@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json, base64, io
 from pathlib import Path
@@ -6,8 +8,13 @@ from dash import Dash, html, dcc, Input, Output, State, dash_table, no_update, c
 import pandas as pd
 import numpy as np
 
-from snake_rules import SUPPORTED_PLAYER_COUNTS
-from scoring import compute_composites
+from snake_rules import (
+    SUPPORTED_PLAYER_COUNTS,
+    get_turn_distribution,
+    build_turn_override_template,
+    validate_turn_override,
+)
+from scoring import compute_optimizer_metrics
 from optimizer import build_optimized_official_snake_schedule
 
 # =========================================
@@ -71,6 +78,12 @@ def _upload_to_df(contents, filename):
     if filename.lower().endswith((".xls", ".xlsx")):
         return pd.read_excel(io.BytesIO(decoded))
     raise ValueError("Unsupported file format. Please upload CSV or XLSX.")
+
+
+def _turn_distribution_text(num_players: int) -> str:
+    dist = get_turn_distribution(num_players)
+    parts = [f"{count} player(s) x {turns} turns" for turns, count in dist.items()]
+    return ", ".join(parts)
 
 
 # =========================================
@@ -243,13 +256,21 @@ def schedule_to_names(schedule_df: pd.DataFrame) -> pd.DataFrame:
 
 def build_period_rating_summary(schedule_df: pd.DataFrame) -> pd.DataFrame:
     if schedule_df is None or schedule_df.empty:
-        return pd.DataFrame(columns=["period", "total_rating", "avg_player_rating", "players"])
+        return pd.DataFrame(
+            columns=[
+                "period", "total_rating", "avg_player_rating",
+                "total_attack", "avg_attack", "top_scorers", "players"
+            ]
+        )
 
     summary = (
         schedule_df.groupby("period", as_index=False)
         .agg(
             total_rating=("composite", "sum"),
             avg_player_rating=("composite", "mean"),
+            total_attack=("attack_score", "sum"),
+            avg_attack=("attack_score", "mean"),
+            top_scorers=("is_top_scorer", "sum"),
             players=("name", lambda s: ", ".join(s.tolist()))
         )
         .sort_values("period")
@@ -257,24 +278,56 @@ def build_period_rating_summary(schedule_df: pd.DataFrame) -> pd.DataFrame:
     )
     summary["total_rating"] = summary["total_rating"].round(2)
     summary["avg_player_rating"] = summary["avg_player_rating"].round(2)
+    summary["total_attack"] = summary["total_attack"].round(2)
+    summary["avg_attack"] = summary["avg_attack"].round(2)
+    summary["top_scorers"] = summary["top_scorers"].astype(int)
     return summary
 
 
 def build_player_rating_summary(seeded_view: pd.DataFrame) -> pd.DataFrame:
     if seeded_view is None or seeded_view.empty:
         return pd.DataFrame(
-            columns=["initial_rank", "seed_order", "player_id", "name", "jersey", "overall_rating", "slot", "turns"]
+            columns=[
+                "initial_rank", "seed_order", "player_id", "name", "jersey",
+                "overall_rating", "attack_score", "extra_turn_priority",
+                "slot", "turns", "target_turns", "turn_mismatch", "is_top_scorer"
+            ]
         )
 
     out = seeded_view.copy()
     out = out.rename(columns={"composite": "overall_rating"})
-    keep_cols = ["initial_rank", "seed_order", "player_id", "name", "jersey", "overall_rating", "slot", "turns"]
+    keep_cols = [
+        "initial_rank", "seed_order", "player_id", "name", "jersey",
+        "overall_rating", "attack_score", "extra_turn_priority",
+        "slot", "turns", "target_turns", "turn_mismatch", "is_top_scorer"
+    ]
     for col in keep_cols:
         if col not in out.columns:
             out[col] = None
     out = out[keep_cols].copy()
     out["overall_rating"] = pd.to_numeric(out["overall_rating"], errors="coerce").round(2)
+    out["attack_score"] = pd.to_numeric(out["attack_score"], errors="coerce").round(2)
+    out["extra_turn_priority"] = pd.to_numeric(out["extra_turn_priority"], errors="coerce").round(2)
     return out.sort_values(["seed_order", "player_id"]).reset_index(drop=True)
+
+
+def build_turn_override_rows(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    player_ids = metrics_df["player_id"].astype(int).tolist()
+    priority_scores = dict(zip(metrics_df["player_id"].astype(int), metrics_df["extra_turn_priority"].astype(float)))
+    default_targets = build_turn_override_template(
+        player_ids=player_ids,
+        priority_scores=priority_scores,
+        num_players=len(metrics_df),
+    )
+
+    out = metrics_df[["player_id", "name", "jersey", "composite", "attack_score", "extra_turn_priority"]].copy()
+    out["default_turns"] = out["player_id"].astype(int).map(default_targets)
+    out["target_turns"] = out["default_turns"]
+    out["manual_override"] = False
+    out["composite"] = pd.to_numeric(out["composite"], errors="coerce").round(2)
+    out["attack_score"] = pd.to_numeric(out["attack_score"], errors="coerce").round(2)
+    out["extra_turn_priority"] = pd.to_numeric(out["extra_turn_priority"], errors="coerce").round(2)
+    return out
 
 
 # =========================================
@@ -465,6 +518,7 @@ app.layout = html.Div(
                     className="u10-tabs",
                     children=[
                         dcc.Store(id="snake-attending-prev", data=[]),
+                        dcc.Store(id="turn-override-store"),
 
                         html.Div(
                             style={"marginTop": "12px", "padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
@@ -476,6 +530,7 @@ app.layout = html.Div(
                                         html.Div("Official mode", style={"fontWeight": 700, "marginBottom": "6px"}),
                                         html.Div(f"{PLAYERS_ON_COURT_DEFAULT} players on court, {NUM_PERIODS_DEFAULT} periods"),
                                         html.Div(f"Supported attendance: {SUPPORTED_PLAYER_COUNTS}", style={"marginTop": "4px", "fontStyle": "italic"}),
+                                        html.Div(id="snake-turn-distribution", style={"marginTop": "6px", "fontStyle": "italic"}),
                                     ],
                                 ),
 
@@ -511,6 +566,41 @@ app.layout = html.Div(
 
                                 html.Div(id="snake-picker-err", style={"marginTop": "8px", "color": "#b00020"}),
 
+                                html.Div(style={"height": "14px"}),
+                                html.Div(
+                                    style={"padding": "16px", "border": "1px solid #999", "borderRadius": "10px"},
+                                    children=[
+                                        html.H4("Turn targets"),
+                                        html.Div(
+                                            "Default turn targets are derived from the selected players' skill profile. "
+                                            "You can override them manually, but the overall turn distribution must still match the official snake template.",
+                                            style={"marginBottom": "10px"},
+                                        ),
+                                        dash_table.DataTable(
+                                            id="turn-override-table",
+                                            data=[],
+                                            columns=[
+                                                {"name": "player_id", "id": "player_id"},
+                                                {"name": "name", "id": "name"},
+                                                {"name": "jersey", "id": "jersey"},
+                                                {"name": "composite", "id": "composite"},
+                                                {"name": "attack_score", "id": "attack_score"},
+                                                {"name": "priority", "id": "extra_turn_priority"},
+                                                {"name": "default_turns", "id": "default_turns"},
+                                                {"name": "target_turns", "id": "target_turns", "type": "numeric"},
+                                                {"name": "manual_override", "id": "manual_override"},
+                                            ],
+                                            editable=True,
+                                            row_deletable=False,
+                                            page_size=20,
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={"minWidth": 90, "whiteSpace": "normal"},
+                                        ),
+                                        html.Div(id="turn-override-msg", style={"marginTop": "8px", "color": "#088a2a"}),
+                                        html.Div(id="turn-override-err", style={"marginTop": "6px", "color": "#b00020"}),
+                                    ],
+                                ),
+
                                 html.Br(),
                                 html.Button("Generate Lineups", id="snake-generate", n_clicks=0, style={"background": "#0E2B5C", "color": "white"}),
                                 html.Div(id="snake-err", style={"marginTop": "10px", "color": "#b00020"}),
@@ -530,6 +620,9 @@ app.layout = html.Div(
                                         {"name": "period", "id": "period"},
                                         {"name": "total_rating", "id": "total_rating"},
                                         {"name": "avg_player_rating", "id": "avg_player_rating"},
+                                        {"name": "total_attack", "id": "total_attack"},
+                                        {"name": "avg_attack", "id": "avg_attack"},
+                                        {"name": "top_scorers", "id": "top_scorers"},
                                         {"name": "players", "id": "players"},
                                     ],
                                     page_size=20,
@@ -554,8 +647,13 @@ app.layout = html.Div(
                                         {"name": "name", "id": "name"},
                                         {"name": "jersey", "id": "jersey"},
                                         {"name": "overall_rating", "id": "overall_rating"},
+                                        {"name": "attack_score", "id": "attack_score"},
+                                        {"name": "extra_turn_priority", "id": "extra_turn_priority"},
                                         {"name": "slot", "id": "slot"},
                                         {"name": "turns", "id": "turns"},
+                                        {"name": "target_turns", "id": "target_turns"},
+                                        {"name": "turn_mismatch", "id": "turn_mismatch"},
+                                        {"name": "is_top_scorer", "id": "is_top_scorer"},
                                     ],
                                     page_size=20,
                                     style_table={"overflowX": "auto"},
@@ -873,6 +971,51 @@ def snake_picker(n_all, n_clear, new_val, options, prev_val):
     return new_val or [], new_val or [], err, count_text
 
 
+@app.callback(
+    Output("turn-override-table", "data"),
+    Output("turn-override-msg", "children"),
+    Output("turn-override-err", "children"),
+    Output("snake-turn-distribution", "children"),
+    Output("turn-override-store", "data"),
+    Input("snake-attending-list", "value"),
+    State("players-store", "data"),
+    State("weights-store", "data"),
+    prevent_initial_call=False
+)
+def seed_turn_override_table(attending_ids, store_players, store_weights):
+    if not attending_ids:
+        return [], "", "", "", None
+
+    players = pd.DataFrame(store_players) if store_players else players_load()
+    weights = pd.DataFrame(store_weights) if store_weights else weights_load()
+
+    if players is None or players.empty:
+        return [], "", "No saved players found (Tab 1).", "", None
+
+    if weights is None or weights.empty:
+        weights = weights_empty_table()
+
+    players_att = players[players["player_id"].isin(attending_ids)].copy()
+    if len(players_att) not in SUPPORTED_PLAYER_COUNTS:
+        return [], "", (
+            f"Official snake templates support {SUPPORTED_PLAYER_COUNTS}. "
+            f"Current selection: {len(players_att)} players."
+        ), "", None
+
+    wissues = weights_validate(weights.copy())
+    if wissues:
+        return [], "", f"Weights invalid: {'; '.join(wissues)}", "", None
+
+    metrics_df = compute_optimizer_metrics(players_att, weights)
+    override_df = build_turn_override_rows(metrics_df)
+
+    dist_text = f"Official turn distribution for {len(players_att)} players: {_turn_distribution_text(len(players_att))}"
+    msg = "Default turn targets generated from the selected players' derived priority."
+
+    data = override_df.replace({np.nan: None}).to_dict(orient="records")
+    return data, msg, "", dist_text, data
+
+
 # ---------- TAB 3 GENERATE CALLBACK ----------
 @app.callback(
     Output("snake-period-ratings", "data"),
@@ -889,9 +1032,10 @@ def snake_picker(n_all, n_clear, new_val, options, prev_val):
     State("snake-attending-list", "value"),
     State("players-store", "data"),
     State("weights-store", "data"),
+    State("turn-override-table", "data"),
     prevent_initial_call=True
 )
-def snake_generate(n, attending_ids, store_players, store_weights):
+def snake_generate(n, attending_ids, store_players, store_weights, turn_override_rows):
     if not n:
         return (
             no_update, no_update,
@@ -910,6 +1054,9 @@ def snake_generate(n, attending_ids, store_players, store_weights):
         {"name": "period", "id": "period"},
         {"name": "total_rating", "id": "total_rating"},
         {"name": "avg_player_rating", "id": "avg_player_rating"},
+        {"name": "total_attack", "id": "total_attack"},
+        {"name": "avg_attack", "id": "avg_attack"},
+        {"name": "top_scorers", "id": "top_scorers"},
         {"name": "players", "id": "players"},
     ]
     player_rating_cols = [
@@ -919,8 +1066,13 @@ def snake_generate(n, attending_ids, store_players, store_weights):
         {"name": "name", "id": "name"},
         {"name": "jersey", "id": "jersey"},
         {"name": "overall_rating", "id": "overall_rating"},
+        {"name": "attack_score", "id": "attack_score"},
+        {"name": "extra_turn_priority", "id": "extra_turn_priority"},
         {"name": "slot", "id": "slot"},
         {"name": "turns", "id": "turns"},
+        {"name": "target_turns", "id": "target_turns"},
+        {"name": "turn_mismatch", "id": "turn_mismatch"},
+        {"name": "is_top_scorer", "id": "is_top_scorer"},
     ]
 
     if players is None or players.empty:
@@ -946,10 +1098,47 @@ def snake_generate(n, attending_ids, store_players, store_weights):
     if wissues:
         return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", f"Weights invalid: {'; '.join(wissues)}"
 
-    comp_df = compute_composites(players_att, weights)
+    metrics_df = compute_optimizer_metrics(players_att, weights)
+
+    manual_turn_targets = None
+    if turn_override_rows:
+        override_df = pd.DataFrame(turn_override_rows).copy()
+        if not override_df.empty:
+            for col in ["player_id", "target_turns", "default_turns"]:
+                if col in override_df.columns:
+                    override_df[col] = pd.to_numeric(override_df[col], errors="coerce")
+
+            if override_df["player_id"].isna().any():
+                return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", "Turn override table contains invalid player_id values."
+
+            if override_df["target_turns"].isna().any():
+                return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", "Turn override table contains invalid target_turns values."
+
+            manual_turn_targets = {
+                int(row["player_id"]): int(row["target_turns"])
+                for _, row in override_df.iterrows()
+            }
+
+            try:
+                validate_turn_override(
+                    manual_turn_targets,
+                    num_players=len(metrics_df),
+                    expected_player_ids=metrics_df["player_id"].astype(int).tolist(),
+                )
+            except Exception as e:
+                return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", f"Turn override invalid: {e}"
+
+    pair_split = []
+    names_present = set(metrics_df["name"].astype(str))
+    if {"Jens", "Pepijn"}.issubset(names_present):
+        pair_split.append(("Jens", "Pepijn"))
 
     try:
-        seeded_view, schedule_df, diagnostics = build_optimized_official_snake_schedule(comp_df)
+        seeded_view, schedule_df, diagnostics = build_optimized_official_snake_schedule(
+            metrics_df,
+            manual_turn_targets=manual_turn_targets,
+            pair_split_prefs=pair_split,
+        )
     except Exception as e:
         return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", f"Schedule build error: {e}"
 
@@ -964,12 +1153,17 @@ def snake_generate(n, attending_ids, store_players, store_weights):
         if not wide_df.empty:
             wide_df.to_csv(EXPORT_WIDE, index=False)
 
-        msg = (
-            f"Generated optimized official {len(players_att)}-player snake lineup. "
-            f"Gap={diagnostics.period_score_gap:g}, "
-            f"Avg={diagnostics.average_period_score:g}, "
-            f"Deviation={diagnostics.total_deviation_from_average:g}."
-        )
+        msg_parts = [
+            f"Generated optimized official {len(players_att)}-player snake lineup.",
+            f"Composite gap={diagnostics.period_score_gap:g}",
+            f"Composite avg={diagnostics.average_period_score:g}",
+            f"Attack gap={diagnostics.period_attack_score_gap:g}",
+            f"Turn mismatch={diagnostics.total_turn_mismatch:g}",
+            f"Top-scorer excess={diagnostics.total_top_scorer_excess:g}",
+        ]
+        if pair_split:
+            msg_parts.append(f"Split-pair overlap penalty={diagnostics.total_pair_overlap_penalty:g}")
+        msg = " ".join(msg_parts)
     except Exception as e:
         msg = f"Generated optimized lineup. Export failed: {e}"
 
