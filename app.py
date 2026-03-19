@@ -229,7 +229,6 @@ def schedule_to_wide(schedule_df: pd.DataFrame, seeded: pd.DataFrame) -> pd.Data
     if schedule_df is None or schedule_df.empty:
         return pd.DataFrame()
 
-    # Fixed left-to-right column order
     ordered_names = seeded.sort_values("seed_order")["name"].astype(str).tolist()
     periods = sorted(schedule_df["period"].unique())
 
@@ -237,53 +236,13 @@ def schedule_to_wide(schedule_df: pd.DataFrame, seeded: pd.DataFrame) -> pd.Data
     for name in ordered_names:
         wide[name] = ""
 
-    prev_names = set()
-    prev_start_idx = None
-
     for p in periods:
-        subset = schedule_df[schedule_df["period"] == p].copy()
-        current_names = set(subset["name"].astype(str).tolist())
-
-        if not current_names:
-            prev_names = set()
-            prev_start_idx = None
-            continue
-
-        # Players in the current lineup who were NOT in the previous lineup
-        incoming_names = current_names - prev_names
-
-        # Start at the first incoming player from the left
-        incoming_indices = [
-            i for i, name in enumerate(ordered_names)
-            if name in incoming_names
-        ]
-
-        if incoming_indices:
-            start_idx = incoming_indices[0]
-        else:
-            # Fallback when no one new enters:
-            # keep the previous start if possible, otherwise use the leftmost active player
-            active_indices = [
-                i for i, name in enumerate(ordered_names)
-                if name in current_names
-            ]
-
-            if prev_start_idx is not None:
-                rotated_indices = list(range(prev_start_idx, len(ordered_names))) + list(range(0, prev_start_idx))
-                start_idx = next((i for i in rotated_indices if i in active_indices), active_indices[0])
-            else:
-                start_idx = active_indices[0]
-
-        # Circular scan from start_idx, assign 1..5 only to active players
-        rotated_names = ordered_names[start_idx:] + ordered_names[:start_idx]
-        rank = 1
-        for name in rotated_names:
+        current_names = set(
+            schedule_df.loc[schedule_df["period"] == p, "name"].astype(str).tolist()
+        )
+        for name in ordered_names:
             if name in current_names:
-                wide.loc[wide["period"] == p, name] = str(rank)
-                rank += 1
-
-        prev_names = current_names
-        prev_start_idx = start_idx
+                wide.loc[wide["period"] == p, name] = "🟢"
 
     return wide
 
