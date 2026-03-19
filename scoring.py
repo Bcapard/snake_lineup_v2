@@ -1,53 +1,70 @@
-from __future__ import annotations
-
-from typing import Dict
-
-import numpy as np
 import pandas as pd
 
-
-SKILL_COLS = ["Scoring", "Defense", "BallHandling", "Height", "Hustle"]
-
-
-def normalize_weights(weights_df: pd.DataFrame) -> Dict[str, float]:
-    if weights_df is None or weights_df.empty:
-        return {k: 1.0 / len(SKILL_COLS) for k in SKILL_COLS}
-
-    df = weights_df.copy()
-    df["Metric"] = df["Metric"].astype(str).str.strip()
-    df["Weight"] = pd.to_numeric(df["Weight"], errors="coerce").fillna(0.0)
-
-    weight_map = {k: 0.0 for k in SKILL_COLS}
-    for _, row in df.iterrows():
-        metric = row["Metric"]
-        if metric in weight_map:
-            weight_map[metric] = max(float(row["Weight"]), 0.0)
-
-    total = sum(weight_map.values())
-    if total <= 0:
-        return {k: 1.0 / len(SKILL_COLS) for k in SKILL_COLS}
-
-    return {k: v / total for k, v in weight_map.items()}
+DEFAULT_WEIGHTS = {
+    "Scoring": 20,
+    "Defense": 20,
+    "BallHandling": 20,
+    "Height": 20,
+    "Hustle": 20,
+}
 
 
-def compute_composites(players_df: pd.DataFrame, weights_df: pd.DataFrame) -> pd.DataFrame:
-    if players_df is None or players_df.empty:
-        if players_df is None:
-            return pd.DataFrame(columns=["composite"])
-        out = players_df.copy()
-        out["composite"] = []
-        return out
+def compute_composites(players_df: pd.DataFrame, weights_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    weights = DEFAULT_WEIGHTS.copy()
 
-    out = players_df.copy()
+    if weights_df is not None:
+        for _, row in weights_df.iterrows():
+            weights[row["skill"]] = row["weight"]
 
-    for col in SKILL_COLS:
-        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+    df = players_df.copy()
 
-    norm_weights = normalize_weights(weights_df)
+    total_weight = sum(weights.values())
 
-    composite = np.zeros(len(out), dtype=float)
-    for col in SKILL_COLS:
-        composite += out[col].astype(float).values * norm_weights[col]
+    df["composite"] = (
+        df["Scoring"] * weights["Scoring"]
+        + df["Defense"] * weights["Defense"]
+        + df["BallHandling"] * weights["BallHandling"]
+        + df["Height"] * weights["Height"]
+        + df["Hustle"] * weights["Hustle"]
+    ) / total_weight
 
-    out["composite"] = np.round(composite, 4)
-    return out
+    return df
+
+
+def compute_optimizer_metrics(players_df: pd.DataFrame, weights_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    df = compute_composites(players_df, weights_df)
+
+    # Attack / scoring ability
+    df["attack_score"] = (
+        0.55 * df["Scoring"]
+        + 0.20 * df["BallHandling"]
+        + 0.15 * df["Hustle"]
+        + 0.10 * df["Height"]
+    )
+
+    # Spacing / gravity
+    df["space_score"] = (
+        0.60 * df["Scoring"]
+        + 0.30 * df["BallHandling"]
+        + 0.10 * df["Hustle"]
+    )
+
+    # Ball security / reliability
+    df["ball_security_score"] = (
+        0.65 * df["BallHandling"]
+        + 0.35 * df["Hustle"]
+    )
+
+    # Priority for extra turns
+    df["extra_turn_priority"] = (
+        0.50 * df["composite"]
+        + 0.30 * df["attack_score"]
+        + 0.20 * df["ball_security_score"]
+    )
+
+    # Identify top scorers dynamically (top 3 by space_score)
+    df = df.sort_values("space_score", ascending=False)
+    df["is_top_scorer"] = False
+    df.loc[df.head(min(3, len(df))).index, "is_top_scorer"] = True
+
+    return df
