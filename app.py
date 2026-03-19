@@ -681,7 +681,7 @@ app.layout = html.Div(
                                     columns=[{"name": "period", "id": "period"}],
                                     page_size=20,
                                     style_table={"overflowX": "auto"},
-                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "18px",},
+                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px",},
                                 ),
                             ],
                         ),
