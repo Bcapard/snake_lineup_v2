@@ -638,6 +638,7 @@ app.layout = html.Div(
                                                 {"name": "target_turns", "id": "target_turns", "type": "numeric"},
                                                 {"name": "manual_override", "id": "manual_override"},
                                             ],
+                                            hidden_columns=["player_id", "extra_turn_priority", "manual_override"],
                                             editable=True,
                                             row_deletable=False,
                                             page_size=20,
@@ -682,7 +683,7 @@ app.layout = html.Div(
 
                         html.Div(style={"height": "14px"}),
                         html.Div(
-                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
+                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px", "display": "none",},
                             children=[
                                 html.H4("Player Rating Overview"),
                                 dash_table.DataTable(
