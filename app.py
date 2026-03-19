@@ -242,7 +242,7 @@ def schedule_to_wide(schedule_df: pd.DataFrame, seeded: pd.DataFrame) -> pd.Data
         )
         for name in ordered_names:
             if name in current_names:
-                wide.loc[wide["period"] == p, name] = "🟢"
+                wide.loc[wide["period"] == p, name] = "●"
 
     return wide
 
@@ -681,7 +681,12 @@ app.layout = html.Div(
                                     columns=[{"name": "period", "id": "period"}],
                                     page_size=20,
                                     style_table={"overflowX": "auto"},
-                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px",},
+                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px", "color": "#1B5E20",},
+                                    style_data_conditional=[
+                                        {
+                                            "if": {"column_id": "period"}, "color": "#0b2545", "fontSize": "16px",
+                                        }
+                                    ],
                                 ),
                             ],
                         ),
