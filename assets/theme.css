@@ -1,0 +1,138 @@
+/* ===========================
+   Team palette (CSS variables)
+   =========================== */
+:root{
+  --navy:#0E2B5C;
+  --orange:#F57C00;
+  --gold:#FFB400;
+  --red:#E53935;
+  --gray-700:#4E5565;
+  --wing:#C5D2DF;
+
+  --paper:#FFFFFF;
+  --bg:#F4F7FB;
+  --border:#E0E6EF;
+}
+
+/* ===== Base page ===== */
+html, body {
+  background: var(--bg);
+  color: var(--navy);
+}
+
+/* A simple “card” utility you can apply to wrappers */
+.u10-card {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+/* ===== Tabs (Option B: broader selectors) =====
+   Match either: `.u10-tabs .tab` OR `.tab.u10-tabs`
+   and `.u10-tabs .tab--selected` OR `.tab--selected.u10-tabs`
+*/
+.u10-tabs .tab,
+.tab.u10-tabs {
+  background: var(--bg);
+  color: var(--navy);
+  border-color: var(--border);
+}
+
+.u10-tabs .tab--selected,
+.tab--selected.u10-tabs {
+  background: var(--navy) !important;
+  color: #fff !important;
+  border-top: 3px solid var(--orange) !important; /* override default blue */
+  border-color: var(--border);
+}
+
+/* Hover */
+.u10-tabs .tab:hover,
+.tab.u10-tabs:hover {
+  background: #f9fbff;
+}
+
+/* Optional: raise selected tab slightly (visual depth) */
+.u10-tabs .tab--selected,
+.tab--selected.u10-tabs {
+  box-shadow: 0 1px 0 rgba(0,0,0,0.02) inset;
+}
+
+/* ===== Buttons ===== */
+button, .btn {
+  background: var(--orange);
+  color: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+button:hover, .btn:hover { filter: brightness(0.95); }
+button.secondary, .btn.secondary {
+  background: var(--paper);
+  color: var(--navy);
+}
+
+/* ===== Upload dashed dropzone ===== */
+.u10-drop {
+  border: 1px dashed #B7C3D0;
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+/* ===== Dash DataTable tweaks ===== */
+.dash-table-container {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.dash-spreadsheet-container .dash-spreadsheet-inner table {
+  border-color: var(--border);
+}
+.dash-spreadsheet-menu { background: var(--paper); border-color: var(--border); }
+
+/* Light zebra stripes for readability */
+.dash-table-container .row-odd {
+  background-color: rgba(197,210,223,0.10); /* wing gray at 10% */
+}
+
+/* ===== Status text helpers ===== */
+.status-ok { color: var(--orange); }
+.status-err { color: var(--red); }
+
+/* ===== Accessibility focus ring (general) ===== */
+:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.chip-wrap { display:flex; flex-wrap:wrap; gap:8px; }
+.chip-group .chip-input { display:none; } /* hide native checkbox */
+
+.chip-group .chip-label{
+  display:inline-block;
+  padding:6px 12px;
+  border-radius:999px;
+  border:1px solid var(--gray-200);
+  background:#f7f9fc;
+  color:var(--gray-700);
+  cursor:pointer;
+  user-select:none;
+  font-size:14px;
+}
+.chip-group .chip-input:checked + .chip-label{
+  background:var(--navy);
+  color:#fff;
+  border-color:var(--navy);
+}
+.chip-group .chip-label:hover{ filter:brightness(0.98); }
+.chip-group .chip-input:focus + .chip-label{ box-shadow:0 0 0 2px rgba(14,43,92,.2); }
+
+.btn-secondary{
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid var(--gray-200);
+  background:var(--paper);
+  cursor:pointer;
+}
+.btn-secondary:hover{ filter:brightness(0.98); }
