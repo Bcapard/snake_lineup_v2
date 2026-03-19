@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Iterable
+from typing import Dict, List, Iterable, Optional
 
 
 NUM_PERIODS = 8
@@ -191,3 +191,86 @@ def get_snake_template(num_players: int) -> SnakeTemplate:
     )
     validate_snake_template(template)
     return template
+
+
+def compute_slot_overlap(template: SnakeTemplate) -> Dict[tuple[int, int], int]:
+    overlap: Dict[tuple[int, int], int] = {}
+    for slot_a in template.slot_to_periods:
+        periods_a = set(template.slot_to_periods[slot_a])
+        for slot_b in template.slot_to_periods:
+            periods_b = set(template.slot_to_periods[slot_b])
+            overlap[(slot_a, slot_b)] = len(periods_a & periods_b)
+    return overlap
+
+
+def get_turn_buckets(template: SnakeTemplate) -> Dict[int, List[int]]:
+    buckets: Dict[int, List[int]] = {}
+    for slot, turns in template.turns_per_slot.items():
+        buckets.setdefault(turns, []).append(slot)
+    for turns in buckets:
+        buckets[turns] = sorted(buckets[turns])
+    return dict(sorted(buckets.items(), reverse=True))
+
+
+def get_turn_distribution(num_players: int) -> Dict[int, int]:
+    template = get_snake_template(num_players)
+    distribution: Dict[int, int] = {}
+    for turns in template.turns_per_slot.values():
+        distribution[turns] = distribution.get(turns, 0) + 1
+    return dict(sorted(distribution.items(), reverse=True))
+
+
+def derive_default_turn_targets(
+    player_ids: List[int],
+    priority_scores: Dict[int, float],
+    num_players: int,
+) -> Dict[int, int]:
+    template = get_snake_template(num_players)
+    slot_turns_sorted = sorted(template.turns_per_slot.values(), reverse=True)
+
+    ranked_players = sorted(
+        player_ids,
+        key=lambda pid: (-priority_scores.get(pid, 0.0), pid),
+    )
+
+    return {
+        pid: slot_turns_sorted[idx]
+        for idx, pid in enumerate(ranked_players)
+    }
+
+
+def validate_turn_override(
+    override_targets: Dict[int, int],
+    num_players: int,
+    expected_player_ids: Optional[Iterable[int]] = None,
+) -> None:
+    template = get_snake_template(num_players)
+    expected_turns = sorted(template.turns_per_slot.values())
+    actual_turns = sorted(override_targets.values())
+
+    if actual_turns != expected_turns:
+        raise ValueError(
+            f"Invalid turn override distribution. Expected {expected_turns}, got {actual_turns}"
+        )
+
+    if expected_player_ids is not None:
+        expected_ids = sorted(expected_player_ids)
+        actual_ids = sorted(override_targets.keys())
+        if actual_ids != expected_ids:
+            raise ValueError(
+                f"Turn override player IDs mismatch. Expected {expected_ids}, got {actual_ids}"
+            )
+
+
+def build_turn_override_template(
+    player_ids: List[int],
+    priority_scores: Dict[int, float],
+    num_players: int,
+) -> Dict[int, int]:
+    targets = derive_default_turn_targets(
+        player_ids=player_ids,
+        priority_scores=priority_scores,
+        num_players=num_players,
+    )
+    validate_turn_override(targets, num_players, expected_player_ids=player_ids)
+    return targets
