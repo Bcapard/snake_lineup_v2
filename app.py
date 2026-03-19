@@ -6,8 +6,9 @@ from dash import Dash, html, dcc, Input, Output, State, dash_table, no_update, c
 import pandas as pd
 import numpy as np
 
-from snake_rules import get_snake_template, SUPPORTED_PLAYER_COUNTS
+from snake_rules import SUPPORTED_PLAYER_COUNTS
 from scoring import compute_composites
+from optimizer import build_optimized_official_snake_schedule
 
 # =========================================
 # CONFIG & CONSTANTS
@@ -213,114 +214,8 @@ def weights_validate(df: pd.DataFrame):
 
 
 # =========================================
-# OFFICIAL SNAKE GENERATOR
+# LINEUP DISPLAY HELPERS
 # =========================================
-def apply_rank_swap(player_records, do_swap=False):
-    """
-    Temporary ranking-based swap for the current non-optimized assignment.
-    Swaps ranks:
-      4 <-> 8
-      5 <-> 9
-    """
-    out = list(player_records)
-    if do_swap and len(out) == 10:
-        out[3], out[7] = out[7], out[3]
-        out[4], out[8] = out[8], out[4]
-    return out
-
-
-def _seed_metadata(slot: int, num_players: int) -> dict:
-    chunk = ((slot - 1) // PLAYERS_ON_COURT_DEFAULT) + 1
-    position_in_chunk = ((slot - 1) % PLAYERS_ON_COURT_DEFAULT) + 1
-
-    chunk_start = (chunk - 1) * PLAYERS_ON_COURT_DEFAULT + 1
-    chunk_end = min(chunk_start + PLAYERS_ON_COURT_DEFAULT - 1, num_players)
-    chunk_size = chunk_end - chunk_start + 1
-
-    position_for_sort = (
-        position_in_chunk
-        if (chunk % 2) == 1
-        else chunk_size - position_in_chunk + 1
-    )
-
-    return {
-        "chunk": chunk,
-        "position_in_chunk": position_in_chunk,
-        "chunk_size": chunk_size,
-        "position_for_sort": position_for_sort,
-    }
-
-
-def build_official_snake_schedule(comp_df: pd.DataFrame, do_swap: bool = False):
-    num_players = len(comp_df)
-
-    if num_players not in SUPPORTED_PLAYER_COUNTS:
-        raise ValueError(
-            f"Official snake templates support {SUPPORTED_PLAYER_COUNTS}. Current: {num_players}"
-        )
-
-    template = get_snake_template(num_players)
-
-    ranked = comp_df.sort_values(
-        ["composite", "player_id"],
-        ascending=[False, True]
-    ).reset_index(drop=True)
-    ranked["initial_rank"] = np.arange(1, len(ranked) + 1, dtype=int)
-
-    player_records = ranked.to_dict("records")
-    player_records = apply_rank_swap(player_records, do_swap=(do_swap and num_players == 10))
-
-    slot_to_rec = {}
-    for slot, rec in enumerate(player_records, start=1):
-        rec["seed_order"] = slot
-        rec["slot"] = slot
-        rec["turns"] = template.turns_per_slot[slot]
-        rec.update(_seed_metadata(slot, num_players))
-        slot_to_rec[slot] = rec
-
-    rows = []
-    for period, slots in template.period_to_slots.items():
-        for pos, slot in enumerate(slots, start=1):
-            rec = slot_to_rec[slot]
-            rows.append({
-                "period": period,
-                "pos": pos,
-                "player_id": int(rec["player_id"]),
-                "name": str(rec["name"]),
-                "jersey": int(rec["jersey"]) if not pd.isna(rec["jersey"]) else None,
-                "seed_order": int(rec["seed_order"]),
-                "slot": int(rec["slot"]),
-                "turns": int(rec["turns"]),
-                "chunk": int(rec["chunk"]) if not pd.isna(rec["chunk"]) else None,
-                "position_in_chunk": int(rec["position_in_chunk"]) if not pd.isna(rec["position_in_chunk"]) else None,
-                "composite": float(rec["composite"]),
-            })
-
-    schedule_df = pd.DataFrame(rows)
-    seeded_view = pd.DataFrame(player_records)
-
-    seeded_cols = [
-        "seed_order",
-        "player_id",
-        "name",
-        "jersey",
-        "composite",
-        "slot",
-        "turns",
-        "chunk",
-        "position_in_chunk",
-        "chunk_size",
-        "position_for_sort",
-        "initial_rank",
-    ]
-    for col in seeded_cols:
-        if col not in seeded_view.columns:
-            seeded_view[col] = None
-
-    seeded_view = seeded_view[seeded_cols]
-    return seeded_view, schedule_df
-
-
 def schedule_to_wide(schedule_df: pd.DataFrame, seeded: pd.DataFrame) -> pd.DataFrame:
     if schedule_df is None or schedule_df.empty:
         return pd.DataFrame()
@@ -583,19 +478,6 @@ app.layout = html.Div(
                                 ),
 
                                 html.Div(id="snake-picker-err", style={"marginTop": "8px", "color": "#b00020"}),
-
-                                html.Div(
-                                    style={"marginTop": "12px"},
-                                    children=[
-                                        dcc.Checklist(
-                                            id="snake-swap",
-                                            options=[{"label": "Swap ranks 4 & 5 with 8 & 9 before generating", "value": "swap"}],
-                                            value=[],
-                                            inputStyle={"width": "18px", "height": "18px"},
-                                            labelStyle={"display": "inline-flex", "alignItems": "center", "gap": "8px"}
-                                        )
-                                    ],
-                                ),
 
                                 html.Br(),
                                 html.Button("Generate Lineups", id="snake-generate", n_clicks=0, style={"background": "#0E2B5C", "color": "white"}),
@@ -925,10 +807,9 @@ def snake_picker(n_all, n_clear, new_val, options, prev_val):
     State("snake-attending-list", "value"),
     State("players-store", "data"),
     State("weights-store", "data"),
-    State("snake-swap", "value"),
     prevent_initial_call=True
 )
-def snake_generate(n, attending_ids, store_players, store_weights, swap_value):
+def snake_generate(n, attending_ids, store_players, store_weights):
     if not n:
         return no_update, no_update, no_update, no_update, no_update, no_update
 
@@ -963,11 +844,8 @@ def snake_generate(n, attending_ids, store_players, store_weights, swap_value):
 
     comp_df = compute_composites(players_att, weights)
 
-    swap_requested = bool(swap_value and ("swap" in swap_value))
-    swap_applied = swap_requested and (len(players_att) == 10)
-
     try:
-        seeded_view, schedule_df = build_official_snake_schedule(comp_df, do_swap=swap_applied)
+        seeded_view, schedule_df, diagnostics = build_optimized_official_snake_schedule(comp_df)
     except Exception as e:
         return [], empty_cols, [], names_cols, "", f"Schedule build error: {e}"
 
@@ -980,13 +858,14 @@ def snake_generate(n, attending_ids, store_players, store_weights, swap_value):
         if not wide_df.empty:
             wide_df.to_csv(EXPORT_WIDE, index=False)
 
-        msg = f"Generated {NUM_PERIODS_DEFAULT} periods using official {len(players_att)}-player snake template."
-        if swap_applied:
-            msg += " (Swap 4/5 ↔ 8/9 applied)"
-        elif swap_requested:
-            msg += " (Swap ignored, only available for 10 players in ranking mode)"
+        msg = (
+            f"Generated optimized official {len(players_att)}-player snake lineup. "
+            f"Gap={diagnostics.period_score_gap:g}, "
+            f"Avg={diagnostics.average_period_score:g}, "
+            f"Deviation={diagnostics.total_deviation_from_average:g}."
+        )
     except Exception as e:
-        msg = f"Generated {NUM_PERIODS_DEFAULT} periods. Export failed: {e}"
+        msg = f"Generated optimized lineup. Export failed: {e}"
 
     if wide_df.empty:
         wide_cols = [{"name": "period", "id": "period"}]
