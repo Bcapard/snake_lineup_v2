@@ -13,7 +13,6 @@ from optimizer import build_optimized_official_snake_schedule
 # =========================================
 # CONFIG & CONSTANTS
 # =========================================
-# Allow overriding the data dir in hosted environments; default to ./data locally
 BASE = Path(__file__).resolve().parent
 DATA_ROOT = Path(os.getenv("DATA_DIR", BASE / "data"))
 DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -38,7 +37,6 @@ NUM_PERIODS_DEFAULT = 8
 PLAYERS_ON_COURT_DEFAULT = 5
 MAX_ATTENDING = 12
 
-# If you ever want to also persist to server files, set env USE_SERVER_PERSIST=1
 USE_SERVER_PERSIST = os.getenv("USE_SERVER_PERSIST", "0") == "1"
 
 # =========================================
@@ -86,7 +84,6 @@ def players_load():
 
 
 def players_save(df: pd.DataFrame):
-    """Server-side save (optional). Disabled unless USE_SERVER_PERSIST=1."""
     if not USE_SERVER_PERSIST:
         return
     records = df[PLAYER_COLUMNS].replace({np.nan: None}).to_dict(orient="records")
@@ -151,7 +148,6 @@ def weights_load():
 
 
 def weights_save(df: pd.DataFrame):
-    """Server-side save (optional). Disabled unless USE_SERVER_PERSIST=1."""
     if not USE_SERVER_PERSIST:
         return
     records = df.replace({np.nan: None}).to_dict(orient="records")
@@ -245,11 +241,47 @@ def schedule_to_names(schedule_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_period_rating_summary(schedule_df: pd.DataFrame) -> pd.DataFrame:
+    if schedule_df is None or schedule_df.empty:
+        return pd.DataFrame(columns=["period", "total_rating", "avg_player_rating", "players"])
+
+    summary = (
+        schedule_df.groupby("period", as_index=False)
+        .agg(
+            total_rating=("composite", "sum"),
+            avg_player_rating=("composite", "mean"),
+            players=("name", lambda s: ", ".join(s.tolist()))
+        )
+        .sort_values("period")
+        .reset_index(drop=True)
+    )
+    summary["total_rating"] = summary["total_rating"].round(2)
+    summary["avg_player_rating"] = summary["avg_player_rating"].round(2)
+    return summary
+
+
+def build_player_rating_summary(seeded_view: pd.DataFrame) -> pd.DataFrame:
+    if seeded_view is None or seeded_view.empty:
+        return pd.DataFrame(
+            columns=["initial_rank", "seed_order", "player_id", "name", "jersey", "overall_rating", "slot", "turns"]
+        )
+
+    out = seeded_view.copy()
+    out = out.rename(columns={"composite": "overall_rating"})
+    keep_cols = ["initial_rank", "seed_order", "player_id", "name", "jersey", "overall_rating", "slot", "turns"]
+    for col in keep_cols:
+        if col not in out.columns:
+            out[col] = None
+    out = out[keep_cols].copy()
+    out["overall_rating"] = pd.to_numeric(out["overall_rating"], errors="coerce").round(2)
+    return out.sort_values(["seed_order", "player_id"]).reset_index(drop=True)
+
+
 # =========================================
 # APP (Tabs 1–3)
 # =========================================
 app = Dash(__name__, title="U10 Lineup", suppress_callback_exceptions=True)
-server = app.server  # WSGI entrypoint for gunicorn
+server = app.server
 
 app.index_string = """
 <!DOCTYPE html>
@@ -483,6 +515,52 @@ app.layout = html.Div(
                                 html.Button("Generate Lineups", id="snake-generate", n_clicks=0, style={"background": "#0E2B5C", "color": "white"}),
                                 html.Div(id="snake-err", style={"marginTop": "10px", "color": "#b00020"}),
                                 html.Div(id="snake-msg", style={"marginTop": "6px", "color": "#088a2a"}),
+                            ],
+                        ),
+
+                        html.Div(style={"height": "14px"}),
+                        html.Div(
+                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
+                            children=[
+                                html.H4("Lineup Rating by Period"),
+                                dash_table.DataTable(
+                                    id="snake-period-ratings",
+                                    data=[],
+                                    columns=[
+                                        {"name": "period", "id": "period"},
+                                        {"name": "total_rating", "id": "total_rating"},
+                                        {"name": "avg_player_rating", "id": "avg_player_rating"},
+                                        {"name": "players", "id": "players"},
+                                    ],
+                                    page_size=20,
+                                    style_table={"overflowX": "auto"},
+                                    style_cell={"minWidth": 110, "whiteSpace": "normal"},
+                                ),
+                            ],
+                        ),
+
+                        html.Div(style={"height": "14px"}),
+                        html.Div(
+                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
+                            children=[
+                                html.H4("Player Rating Overview"),
+                                dash_table.DataTable(
+                                    id="snake-player-ratings",
+                                    data=[],
+                                    columns=[
+                                        {"name": "initial_rank", "id": "initial_rank"},
+                                        {"name": "seed_order", "id": "seed_order"},
+                                        {"name": "player_id", "id": "player_id"},
+                                        {"name": "name", "id": "name"},
+                                        {"name": "jersey", "id": "jersey"},
+                                        {"name": "overall_rating", "id": "overall_rating"},
+                                        {"name": "slot", "id": "slot"},
+                                        {"name": "turns", "id": "turns"},
+                                    ],
+                                    page_size=20,
+                                    style_table={"overflowX": "auto"},
+                                    style_cell={"minWidth": 100, "whiteSpace": "normal"},
+                                ),
                             ],
                         ),
 
@@ -797,6 +875,10 @@ def snake_picker(n_all, n_clear, new_val, options, prev_val):
 
 # ---------- TAB 3 GENERATE CALLBACK ----------
 @app.callback(
+    Output("snake-period-ratings", "data"),
+    Output("snake-period-ratings", "columns"),
+    Output("snake-player-ratings", "data"),
+    Output("snake-player-ratings", "columns"),
     Output("snake-lineups-wide", "data"),
     Output("snake-lineups-wide", "columns"),
     Output("snake-lineups-names", "data"),
@@ -811,22 +893,44 @@ def snake_picker(n_all, n_clear, new_val, options, prev_val):
 )
 def snake_generate(n, attending_ids, store_players, store_weights):
     if not n:
-        return no_update, no_update, no_update, no_update, no_update, no_update
+        return (
+            no_update, no_update,
+            no_update, no_update,
+            no_update, no_update,
+            no_update, no_update,
+            no_update, no_update
+        )
 
     players = pd.DataFrame(store_players) if store_players else players_load()
     weights = pd.DataFrame(store_weights) if store_weights else weights_load()
 
     empty_cols = [{"name": "period", "id": "period"}]
     names_cols = [{"name": "period", "id": "period"}, {"name": "players", "id": "players"}]
+    period_rating_cols = [
+        {"name": "period", "id": "period"},
+        {"name": "total_rating", "id": "total_rating"},
+        {"name": "avg_player_rating", "id": "avg_player_rating"},
+        {"name": "players", "id": "players"},
+    ]
+    player_rating_cols = [
+        {"name": "initial_rank", "id": "initial_rank"},
+        {"name": "seed_order", "id": "seed_order"},
+        {"name": "player_id", "id": "player_id"},
+        {"name": "name", "id": "name"},
+        {"name": "jersey", "id": "jersey"},
+        {"name": "overall_rating", "id": "overall_rating"},
+        {"name": "slot", "id": "slot"},
+        {"name": "turns", "id": "turns"},
+    ]
 
     if players is None or players.empty:
-        return [], empty_cols, [], names_cols, "", "No saved players found (Tab 1)."
+        return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", "No saved players found (Tab 1)."
 
     if weights is None or weights.empty:
         weights = weights_empty_table()
 
     if not attending_ids:
-        return [], empty_cols, [], names_cols, "", "No attending players selected."
+        return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", "No attending players selected."
 
     if len(attending_ids) > MAX_ATTENDING:
         attending_ids = attending_ids[:MAX_ATTENDING]
@@ -834,21 +938,23 @@ def snake_generate(n, attending_ids, store_players, store_weights):
     players_att = players[players["player_id"].isin(attending_ids)].copy()
 
     if len(players_att) not in SUPPORTED_PLAYER_COUNTS:
-        return [], empty_cols, [], names_cols, "", (
+        return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", (
             f"Official snake templates support {SUPPORTED_PLAYER_COUNTS}. Current selection: {len(players_att)} players."
         )
 
     wissues = weights_validate(weights.copy())
     if wissues:
-        return [], empty_cols, [], names_cols, "", f"Weights invalid: {'; '.join(wissues)}"
+        return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", f"Weights invalid: {'; '.join(wissues)}"
 
     comp_df = compute_composites(players_att, weights)
 
     try:
         seeded_view, schedule_df, diagnostics = build_optimized_official_snake_schedule(comp_df)
     except Exception as e:
-        return [], empty_cols, [], names_cols, "", f"Schedule build error: {e}"
+        return [], period_rating_cols, [], player_rating_cols, [], empty_cols, [], names_cols, "", f"Schedule build error: {e}"
 
+    period_rating_df = build_period_rating_summary(schedule_df)
+    player_rating_df = build_player_rating_summary(seeded_view)
     wide_df = schedule_to_wide(schedule_df, seeded_view)
     names_df = schedule_to_names(schedule_df)
 
@@ -867,6 +973,9 @@ def snake_generate(n, attending_ids, store_players, store_weights):
     except Exception as e:
         msg = f"Generated optimized lineup. Export failed: {e}"
 
+    period_rating_data = period_rating_df.to_dict(orient="records")
+    player_rating_data = player_rating_df.to_dict(orient="records")
+
     if wide_df.empty:
         wide_cols = [{"name": "period", "id": "period"}]
         wide_data = []
@@ -881,7 +990,18 @@ def snake_generate(n, attending_ids, store_players, store_weights):
         n_cols = [{"name": c, "id": c} for c in names_df.columns]
         names_data = names_df.to_dict(orient="records")
 
-    return wide_data, wide_cols, names_data, n_cols, msg, ""
+    return (
+        period_rating_data,
+        period_rating_cols,
+        player_rating_data,
+        player_rating_cols,
+        wide_data,
+        wide_cols,
+        names_data,
+        n_cols,
+        msg,
+        ""
+    )
 
 
 # ---------- HEALTH ENDPOINT (for hosts) ----------
