@@ -1,0 +1,11 @@
+{
+  "name": "snake_lineup",
+  "short_name": "snake_lineup",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b5ed7",
+  "icons": [
+    { "src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}

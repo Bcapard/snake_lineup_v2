@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.env
+.env.*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dash build artifacts
+.cache/
+
+# Runtime data & exports (keep the folder, ignore files)
+data/*
+!data/.gitkeep
+
+# Notebooks / logs (if any)
+*.ipynb_checkpoints
+logs/
