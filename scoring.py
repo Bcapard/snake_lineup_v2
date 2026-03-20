@@ -102,7 +102,7 @@ def compute_composites(players_df: pd.DataFrame, weights_df: pd.DataFrame | None
 def compute_optimizer_metrics(
     players_df: pd.DataFrame,
     weights_df: pd.DataFrame | None,
-    top_scorers_n: int = 3,
+    top_scorers_n: int = 4,
 ) -> pd.DataFrame:
     """
     Builds the richer metric set required by the optimizer.
