@@ -681,10 +681,10 @@ app.layout = html.Div(
                                     columns=[{"name": "period", "id": "period"}],
                                     page_size=20,
                                     style_table={"overflowX": "auto"},
-                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px", "color": "#1B5E20",},
+                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px", "color": "#0E2B5C",},
                                     style_data_conditional=[
                                         {
-                                            "if": {"column_id": "period"}, "color": "#1B5E20", "fontSize": "13px",
+                                            "if": {"column_id": "period"}, "color": "#0E2B5C", "fontSize": "13px",
                                         }
                                     ],
                                 ),
