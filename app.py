@@ -623,34 +623,6 @@ app.layout = html.Div(
                         html.Div(
                             style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
                             children=[
-                                html.H4("Lineup Rating by Period"),
-                                dash_table.DataTable(
-                                    id="snake-period-ratings",
-                                    data=[],
-                                    columns=[
-                                        {"name": "period", "id": "period"},
-                                        {"name": "total_rating", "id": "total_rating"},
-                                        {"name": "avg_player_rating", "id": "avg_player_rating"},
-                                        {"name": "total_attack", "id": "total_attack"},
-                                        {"name": "avg_attack", "id": "avg_attack"},
-                                        {"name": "top_scorers", "id": "top_scorers"},
-                                        {"name": "players", "id": "players"},
-                                    ],
-                                    hidden_columns=["avg_player_rating", "total_attack", "avg_attack"],
-                                    page_size=20,
-                                    style_table={"overflowX": "auto"},
-                                    style_cell={"minWidth": 110, "whiteSpace": "normal"},
-                                    css=[
-                                        {"selector": ".show-hide", "rule": "display: none;"},
-                                    ],
-                                ),
-                            ],
-                        ),
-
-                        html.Div(style={"height": "14px"}),
-                        html.Div(
-                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
-                            children=[
                                 html.H4("Lineups by Period (names)"),
                                 dash_table.DataTable(
                                     id="snake-lineups-names",
@@ -679,6 +651,34 @@ app.layout = html.Div(
                                         {
                                             "if": {"column_id": "period"}, "color": "#0E2B5C", "fontSize": "13px",
                                         }
+                                    ],
+                                ),
+                            ],
+                        ),
+
+                        html.Div(style={"height": "14px"}),
+                        html.Div(
+                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
+                            children=[
+                                html.H4("Lineup Rating by Period"),
+                                dash_table.DataTable(
+                                    id="snake-period-ratings",
+                                    data=[],
+                                    columns=[
+                                        {"name": "period", "id": "period"},
+                                        {"name": "total_rating", "id": "total_rating"},
+                                        {"name": "avg_player_rating", "id": "avg_player_rating"},
+                                        {"name": "total_attack", "id": "total_attack"},
+                                        {"name": "avg_attack", "id": "avg_attack"},
+                                        {"name": "top_scorers", "id": "top_scorers"},
+                                        {"name": "players", "id": "players"},
+                                    ],
+                                    hidden_columns=["avg_player_rating", "total_attack", "avg_attack"],
+                                    page_size=20,
+                                    style_table={"overflowX": "auto"},
+                                    style_cell={"minWidth": 110, "whiteSpace": "normal"},
+                                    css=[
+                                        {"selector": ".show-hide", "rule": "display: none;"},
                                     ],
                                 ),
                             ],
