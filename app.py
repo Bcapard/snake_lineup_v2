@@ -597,7 +597,7 @@ app.layout = html.Div(
                                                 {"name": "target_turns", "id": "target_turns", "type": "numeric"},
                                                 {"name": "manual_override", "id": "manual_override"},
                                             ],
-                                            hidden_columns=["player_id", "extra_turn_priority", "manual_override"],
+                                            hidden_columns=["jersey", "player_id", "composite", "attack_score", "extra_turn_priority", "manual_override"],
                                             editable=True,
                                             row_deletable=False,
                                             page_size=20,
@@ -636,13 +636,54 @@ app.layout = html.Div(
                                         {"name": "top_scorers", "id": "top_scorers"},
                                         {"name": "players", "id": "players"},
                                     ],
+                                    hidden_columns=["avg_player_rating", "total_attack", "avg_attack"],
                                     page_size=20,
                                     style_table={"overflowX": "auto"},
                                     style_cell={"minWidth": 110, "whiteSpace": "normal"},
+                                    css=[
+                                        {"selector": ".show-hide", "rule": "display: none;"},
+                                    ],
                                 ),
                             ],
                         ),
 
+                        html.Div(style={"height": "14px"}),
+                        html.Div(
+                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
+                            children=[
+                                html.H4("Lineups by Period (names)"),
+                                dash_table.DataTable(
+                                    id="snake-lineups-names",
+                                    data=[],
+                                    columns=[{"name": "period", "id": "period"}, {"name": "players", "id": "players"}],
+                                    page_size=20,
+                                    style_table={"overflowX": "auto"},
+                                    style_cell={"minWidth": 120, "whiteSpace": "normal"},
+                                ),
+                            ],
+                        ),
+
+                        html.Div(style={"height": "14px"}),
+                        html.Div(
+                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
+                            children=[
+                                html.H4("Lineups by Period (wide)"),
+                                dash_table.DataTable(
+                                    id="snake-lineups-wide",
+                                    data=[],
+                                    columns=[{"name": "period", "id": "period"}],
+                                    page_size=20,
+                                    style_table={"overflowX": "auto"},
+                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px", "color": "#0E2B5C",},
+                                    style_data_conditional=[
+                                        {
+                                            "if": {"column_id": "period"}, "color": "#0E2B5C", "fontSize": "13px",
+                                        }
+                                    ],
+                                ),
+                            ],
+                        ),
+                        
                         html.Div(style={"height": "14px"}),
                         html.Div(
                             style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px", "display": "none",},
@@ -669,42 +710,6 @@ app.layout = html.Div(
                                     page_size=20,
                                     style_table={"overflowX": "auto"},
                                     style_cell={"minWidth": 100, "whiteSpace": "normal"},
-                                ),
-                            ],
-                        ),
-
-                        html.Div(style={"height": "14px"}),
-                        html.Div(
-                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
-                            children=[
-                                html.H4("Lineups by Period (wide)"),
-                                dash_table.DataTable(
-                                    id="snake-lineups-wide",
-                                    data=[],
-                                    columns=[{"name": "period", "id": "period"}],
-                                    page_size=20,
-                                    style_table={"overflowX": "auto"},
-                                    style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px", "color": "#0E2B5C",},
-                                    style_data_conditional=[
-                                        {
-                                            "if": {"column_id": "period"}, "color": "#0E2B5C", "fontSize": "13px",
-                                        }
-                                    ],
-                                ),
-                            ],
-                        ),
-                        html.Div(style={"height": "14px"}),
-                        html.Div(
-                            style={"padding": "16px", "border": "1px solid #333", "borderRadius": "12px"},
-                            children=[
-                                html.H4("Lineups by Period (names)"),
-                                dash_table.DataTable(
-                                    id="snake-lineups-names",
-                                    data=[],
-                                    columns=[{"name": "period", "id": "period"}, {"name": "players", "id": "players"}],
-                                    page_size=20,
-                                    style_table={"overflowX": "auto"},
-                                    style_cell={"minWidth": 120, "whiteSpace": "normal"},
                                 ),
                             ],
                         ),
