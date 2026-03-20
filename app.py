@@ -684,7 +684,7 @@ app.layout = html.Div(
                                     style_cell={"minWidth": 80, "whiteSpace": "normal", "textAlign": "center", "fontSize": "13px", "color": "#1B5E20",},
                                     style_data_conditional=[
                                         {
-                                            "if": {"column_id": "period"}, "color": "#1B5E20", "fontSize": "16px",
+                                            "if": {"column_id": "period"}, "color": "#1B5E20", "fontSize": "13px",
                                         }
                                     ],
                                 ),
