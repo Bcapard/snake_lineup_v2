@@ -579,8 +579,8 @@ app.layout = html.Div(
                                     children=[
                                         html.H4("Turn targets"),
                                         html.Div(
-                                            "Default turn targets are derived from the selected players' skill profile. "
-                                            "You can override them manually, but the overall turn distribution must still match the official snake template.",
+                                            "Default turn are derived from the selected players' skill profile. "
+                                            "You can override them manually by updating the target_turns column, but the overall turn distribution must still match the official snake template.",
                                             style={"marginBottom": "10px"},
                                         ),
                                         dash_table.DataTable(
@@ -1031,7 +1031,7 @@ def seed_turn_override_table(attending_ids, store_players, store_weights):
     override_df = build_turn_override_rows(metrics_df)
 
     dist_text = f"Official turn distribution for {len(players_att)} players: {_turn_distribution_text(len(players_att))}"
-    msg = "Default turn targets generated from the selected players' derived priority."
+    msg = "Default turn derived from the selected players' skill profile."
 
     data = override_df.replace({np.nan: None}).to_dict(orient="records")
     return data, msg, "", dist_text, data
