@@ -603,6 +603,9 @@ app.layout = html.Div(
                                             page_size=20,
                                             style_table={"overflowX": "auto"},
                                             style_cell={"minWidth": 90, "whiteSpace": "normal"},
+                                            css=[
+                                                {"selector": ".show-hide", "rule": "display: none;"},
+                                            ],
                                         ),
                                         html.Div(id="turn-override-msg", style={"marginTop": "8px", "color": "#088a2a"}),
                                         html.Div(id="turn-override-err", style={"marginTop": "6px", "color": "#b00020"}),
